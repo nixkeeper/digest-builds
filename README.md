@@ -24,7 +24,7 @@ On the `data` branch:
   | `name` | what it builds (`wesnoth-1.18.8`): master's version |
   | `lastSuccessBuild`, `lastSuccessAt`, `lastSuccessName` | for a build that isn't ok, the job's last successful build, when it finished, and its name; `lastSuccessAt` is `never` (the others empty) when Hydra says the job never succeeded; all empty while it isn't known yet (below) |
   | `blockedBy` | for a `dependency` build, which dependency failed: the nixpkgs attribute of its job (`python314Packages.python-ldap`), or its derivation's name when no job of that platform builds it (`source`, a download; `python3.12-anyio-4.14.2`); several space-separated; empty until its page is read (below) |
-  | `failedBecause`, `failedExcerpt` | for a `failed` build, why, from its log: `compile`, `tests`, `link`, `header`, `cmake4` (CMake 4 dropped CMake < 3.5), `cmake`, `boost`, `pythonImport`, `pythonDeps`, `pythonBuild`, `pythonMetadata`, `haskellDeps`, `npm`, `lisp`, `home` (writes to `$HOME`), `download`, `hash`, `patch`, `substitute`, `missingFile`, `symlinks`, `patchelf`, `autotools`, `disk` (Hydra's side), or `other` (none of those); `noLog` when Hydra has no log. `failedExcerpt` is up to three lines that say so (the one a rule matched and those after it, or for `other` the last error line, or how the log ended). Both empty until its log is read (below) |
+  | `failedBecause`, `failedExcerpt` | for a `failed` build, why, from its log: `compile`, `tests`, `link`, `header`, `cmake4` (CMake 4 dropped CMake < 3.5), `cmake`, `boost`, `pythonImport`, `pythonDeps`, `pythonBuild`, `pythonMetadata`, `haskellDeps`, `npm`, `lisp`, `home` (writes to `$HOME`), `download`, `hash`, `patch`, `substitute`, `missingFile`, `symlinks`, `patchelf`, `autotools`, `disk` (Hydra's side), or `other` (none of those); `noLog` when Hydra has no log. `failedExcerpt` is up to three lines that say so (the one a rule matched and those after it; for pytest's tests, its failed tests from its short test summary, then its count; or for `other` the last error line, or how the log ended). Both empty until its log is read (below) |
 
 - [`data/meta.json`](https://raw.githubusercontent.com/nixkeeper/digest-builds/data/data/meta.json):
   which evaluation it is (`eval`), the nixpkgs commit Hydra evaluated
@@ -132,7 +132,7 @@ builds a run within the same 40 minutes, whether or not there's a new
 evaluation. About 4,700 failing on 2026-10-08 take several runs; after
 that, only those a new evaluation brings (a build Hydra doesn't redo keeps
 its id, and its log) and builds Hydra restarted (read again when they
-finish again). `data/reasons.json` keeps what each log said. The rules come
+finish again). `data/reasons.json` keeps what each log said, with the rules' version: a log whose excerpt newer rules say better is read once more (pytest's excerpts, 349 of them, on 2026-10-23). The rules come
 from [nixpkgs-failure-dashboard](https://github.com/Sigmanificient/nixpkgs-failure-dashboard)'s
 classifier (MIT), under nixkeeper's names, with a few more (C++, Rust,
 linker, Haskell and unittest failures, `$HOME`); on a sample of 100 failed

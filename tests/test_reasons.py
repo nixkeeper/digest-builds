@@ -60,6 +60,18 @@ Hunk #1 FAILED at 12.
 1 out of 1 hunk FAILED -- saving rejects to file src/main.c.rej
 """
 
+# python313Packages.python-prctl on aarch64-linux (Hydra build 350260653;
+# its FAILED line shortened).
+PYTEST = """\
+>           self.assertRaises(OSError, prctl.get_tsc)
+E           AssertionError: OSError not raised by call_prctl
+
+test_prctl.py:375: AssertionError
+=========================== short test summary info ============================
+FAILED test_prctl.py::PrctlTest::test_tsc - AssertionError: OSError not raised
+================== 1 failed, 28 passed, 4 deselected in 0.14s ==================
+"""
+
 
 class Classify(unittest.TestCase):
     def test_rules(self):
@@ -74,6 +86,19 @@ class Classify(unittest.TestCase):
             lines,
             "error: could not compile `rustix` (lib) due to 4 previous errors\n"
             "warning: build failed, waiting for other jobs to finish...",
+        )
+
+    def test_pytest_from_its_failed_tests(self):
+        reason, lines = reasons.classify(PYTEST)
+        self.assertEqual(reason, "tests")
+        self.assertEqual(
+            lines.splitlines(),
+            [
+                "FAILED test_prctl.py::PrctlTest::test_tsc - AssertionError: OSError "
+                "not raised",
+                "================== 1 failed, 28 passed, 4 deselected in 0.14s "
+                "==================",
+            ],
         )
 
     def test_hints_must_all_be_there(self):
@@ -135,6 +160,12 @@ class Bookkeeping(unittest.TestCase):
             [r["attr"] for r in reasons.wanted(rows, found)], ["restarted", "new"]
         )
 
+    def test_wanted_again_once_when_the_rules_say_it_better(self):
+        rows = [row("old", "failed", "1"), row("again", "failed", "2")]
+        count = "===== 1 failed, 28 passed in 0.14s ====="
+        found = {"1": [FINISHED, "tests", count], "2": [FINISHED, "tests", count, 2]}
+        self.assertEqual([r["attr"] for r in reasons.wanted(rows, found)], ["old"])
+
     def test_columns_and_counts(self):
         rows = [row("a", "failed", "1"), row("b", "failed", "2"), row("c", "ok", "3")]
         found = {"1": [FINISHED, "hash", "error: hash mismatch"]}
@@ -163,7 +194,7 @@ class LookUp(unittest.TestCase):
         ):
             self.assertEqual(cli.look_up_reasons(rows, found, time.monotonic()), 2)
         self.assertEqual(found["1"][:2], [FINISHED, "hash"])
-        self.assertEqual(found["2"], [FINISHED, reasons.NO_LOG, ""])
+        self.assertEqual(found["2"], [FINISHED, reasons.NO_LOG, "", reasons.VERSION])
         self.assertNotIn("9", found)
 
     def test_at_most_so_many_and_gives_up_on_failures(self):

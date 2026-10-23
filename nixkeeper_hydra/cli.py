@@ -160,7 +160,7 @@ def look_up_last_success(rows, never, started):
 def look_up_reasons(rows, found, started):
     """Read the logs of the failed builds reasons.wanted picks, at most
     MAX_LOGS and MAX_MINUTES since started, into found ({build: [finished,
-    reason, excerpt]}); drop what it has on builds that aren't failed any
+    reason, excerpt, version]}); drop what it has on builds that aren't failed any
     more. Returns how many were read."""
     current = {r["build"] for r in rows if r["status"] == "failed"}
     for build in set(found) - current:
@@ -183,7 +183,7 @@ def look_up_reasons(rows, found, started):
         reason, lines = (
             reasons.classify(log) if log is not None else (reasons.NO_LOG, "")
         )
-        found[row["build"]] = [row["finished"], reason, lines]
+        found[row["build"]] = [row["finished"], reason, lines, reasons.VERSION]
     return read
 
 
