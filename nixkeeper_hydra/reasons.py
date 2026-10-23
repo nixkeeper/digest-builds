@@ -28,6 +28,10 @@ CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 # each cut to so many characters.
 EXCERPT_LINES = 3
 EXCERPT_WIDTH = 200
+# The rules' version, kept with each log read (reasons.json's fourth
+# value): 2 since pytest's excerpt starts at its failed tests (2026-10-23).
+# An excerpt an older version made that it changes is read again, once.
+VERSION = 2
 # A reason for a log Hydra doesn't have (gone, or never kept).
 NO_LOG = "noLog"
 OTHER = "other"
@@ -38,6 +42,10 @@ class Rule:
     reason: str
     pattern: str
     hints: tuple[str, ...] = field(default=())
+    # Where the excerpt starts instead, when it's on a line before the
+    # match: the line after it (pytest's failed tests, under its "short test
+    # summary info", rather than only its count of them after).
+    start: str | None = None
 
 
 RULES = (
@@ -111,6 +119,7 @@ RULES = (
         "tests",
         r"=========+.*(errors?|failed)",
         ("==== short test summary info ====",),
+        start=r"=+ short test summary info =+",
     ),
     Rule(
         "pythonBuild",
@@ -212,7 +221,12 @@ RULES = (
         r"note: build failure may have been caused by lack of free disk space",
     ),
 )
-_COMPILED = tuple((rule, re.compile(rule.pattern)) for rule in RULES)
+_COMPILED = tuple(
+    (rule, re.compile(rule.pattern), rule.start and re.compile(rule.start))
+    for rule in RULES
+)
+# How far back from its match a rule's start is looked for.
+START_WITHIN = 200
 # Any error at all: the line to show for a log no rule explains (a Python
 # exception, "error:", "fatal:").
 ANY_ERROR = re.compile(r"(?i)(error:|exception:|fatal:)")
@@ -237,11 +251,15 @@ def classify(log):
     log's last lines."""
     text = ANSI.sub("", log)
     lines = text.splitlines()
-    for rule, pattern in _COMPILED:
+    for rule, pattern, start in _COMPILED:
         if any(hint not in text for hint in rule.hints):
             continue
         for at in range(len(lines) - 1, -1, -1):
             if pattern.search(lines[at]):
+                if start:
+                    for before in range(at - 1, max(-1, at - START_WITHIN), -1):
+                        if start.search(lines[before]):
+                            return rule.reason, excerpt(lines, before + 1)
                 return rule.reason, excerpt(lines, at)
     for at in range(len(lines) - 1, -1, -1):
         if ANY_ERROR.search(lines[at]):
@@ -253,15 +271,30 @@ def classify(log):
     return OTHER, excerpt(lines, max(0, last - EXCERPT_LINES + 1))
 
 
+def outdated(seen):
+    """Whether what was read (found's [finished, reason, excerpt, version])
+    is one the rules now say better: a pytest excerpt of only its count of
+    failed tests, read before VERSION 2."""
+    return (
+        len(seen) < 4
+        and seen[1] == "tests"
+        and re.match(r"=+ .*(errors?|failed)", seen[2] or "") is not None
+    )
+
+
 def wanted(rows, found):
     """The failed rows whose log to read: not read for this build as it
-    finished (found: read's)."""
+    finished (found: read's), or read with rules that now say it better
+    (outdated)."""
     return [
         r
         for r in rows
         if r["status"] == "failed"
         and r["build"]
-        and (found.get(r["build"]) or [None])[0] != r["finished"]
+        and (
+            (found.get(r["build"]) or [None])[0] != r["finished"]
+            or outdated(found[r["build"]])
+        )
     ]
 
 
@@ -292,7 +325,8 @@ def counts(rows):
 
 
 def read(directory):
-    """reasons.json: {build id: [finished, reason, excerpt]}, or {}."""
+    """reasons.json: {build id: [finished, reason, excerpt, version]}, or
+    {} (version: the rules', VERSION; none before 2)."""
     try:
         with open(os.path.join(directory, CACHE)) as f:
             return json.load(f)
