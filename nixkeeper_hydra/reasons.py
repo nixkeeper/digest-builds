@@ -14,6 +14,7 @@ that matches, in order, says why. A log no rule explains is "other"."""
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 
 CACHE = "reasons.json"
@@ -28,6 +29,11 @@ CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 # each cut to so many characters.
 EXCERPT_LINES = 3
 EXCERPT_WIDTH = 200
+# Each line is matched on its first so many characters: a rule's text is
+# near a line's start, and some patterns (compile's \S+\.(c|h|...)) take time
+# growing with the square of a line's length. atuin's log on 2026-10-26 was
+# one line of 4.2 million characters, hours for that pattern alone.
+MATCH_WIDTH = 1000
 # The rules' version, kept with each log read (reasons.json's fourth
 # value): 2 since pytest's excerpt starts at its failed tests (2026-10-23).
 # An excerpt an older version made that it changes is read again, once.
@@ -35,6 +41,10 @@ VERSION = 2
 # A reason for a log Hydra doesn't have (gone, or never kept).
 NO_LOG = "noLog"
 OTHER = "other"
+
+
+class TooSlow(Exception):
+    """Raised when classify passes its deadline."""
 
 
 @dataclass(frozen=True)
@@ -244,25 +254,35 @@ def excerpt(lines, at):
     return "\n".join(kept)
 
 
-def classify(log):
+def classify(log, deadline=None):
     """(reason, excerpt) for a failed build's log (text): the first rule
     whose pattern is on some line, nearest the end, and whose hints are all
     in the log; else "other", with the last line that has an error, or the
-    log's last lines."""
+    log's last lines. Each line is matched on its first MATCH_WIDTH
+    characters.
+
+    Raises TooSlow once time.monotonic() passes deadline, when one is
+    given: a log no rule should take long on, read whatever it holds."""
     text = ANSI.sub("", log)
-    lines = text.splitlines()
+    lines = [line[:MATCH_WIDTH] for line in text.splitlines()]
+
+    def in_time():
+        if deadline is not None and time.monotonic() > deadline:
+            raise TooSlow
+        return True
+
     for rule, pattern, start in _COMPILED:
         if any(hint not in text for hint in rule.hints):
             continue
         for at in range(len(lines) - 1, -1, -1):
-            if pattern.search(lines[at]):
+            if in_time() and pattern.search(lines[at]):
                 if start:
                     for before in range(at - 1, max(-1, at - START_WITHIN), -1):
                         if start.search(lines[before]):
                             return rule.reason, excerpt(lines, before + 1)
                 return rule.reason, excerpt(lines, at)
     for at in range(len(lines) - 1, -1, -1):
-        if ANY_ERROR.search(lines[at]):
+        if in_time() and ANY_ERROR.search(lines[at]):
             return OTHER, excerpt(lines, at)
     # No line says error: how it ended, its last lines.
     last = max((at for at, line in enumerate(lines) if line.strip()), default=None)
