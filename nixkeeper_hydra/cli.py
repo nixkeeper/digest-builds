@@ -36,6 +36,11 @@ MAX_LOOKUPS = 1500
 # that, those a new evaluation brings (a build Hydra doesn't redo keeps its
 # id, and its log).
 MAX_LOGS = 600
+# Seconds a log may take to classify (reasons.classify): MAX_MINUTES is
+# only checked between logs, so one log that takes hours would run the job
+# into its timeout every hour, before it publishes. Past it, the log is
+# "other", saying so.
+LOG_SECONDS = 30
 
 
 def look_up_blocked(rows, found, started):
@@ -180,9 +185,20 @@ def look_up_reasons(rows, found, started):
             continue
         in_a_row = 0
         read += 1
-        reason, lines = (
-            reasons.classify(log) if log is not None else (reasons.NO_LOG, "")
-        )
+        if log is None:
+            reason, lines = reasons.NO_LOG, ""
+        else:
+            try:
+                reason, lines = reasons.classify(
+                    log, deadline=time.monotonic() + LOG_SECONDS
+                )
+            except reasons.TooSlow:
+                print(
+                    f"::warning::build {row['build']}: its log took over "
+                    f"{LOG_SECONDS} s to classify, left as {reasons.OTHER}",
+                    file=sys.stderr,
+                )
+                reason, lines = reasons.OTHER, f"not classified: over {LOG_SECONDS} s"
         found[row["build"]] = [row["finished"], reason, lines, reasons.VERSION]
     return read
 

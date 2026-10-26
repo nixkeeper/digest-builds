@@ -145,6 +145,22 @@ class Classify(unittest.TestCase):
         self.assertEqual(len(first), reasons.EXCERPT_WIDTH)
         self.assertEqual(len(rest), reasons.EXCERPT_LINES - 1)
 
+    def test_a_line_of_millions_of_characters_is_quick(self):
+        # atuin's log on 2026-10-26: one line of 4.2 million characters,
+        # hours for compile's pattern before lines were cut (MATCH_WIDTH).
+        log = "x" * 4_187_120 + " please look into it\nerror: builder failed\n"
+        began = time.monotonic()
+        self.assertEqual(reasons.classify(log), ("other", "error: builder failed"))
+        self.assertLess(time.monotonic() - began, 2)
+
+    def test_a_rule_past_the_cut_isnt_seen(self):
+        log = "x" * reasons.MATCH_WIDTH + " a.c:1:1: error: bad\n"
+        self.assertNotEqual(reasons.classify(log)[0], "compile")
+
+    def test_past_its_deadline(self):
+        with self.assertRaises(reasons.TooSlow):
+            reasons.classify("error: x\n", deadline=time.monotonic() - 1)
+
 
 class Bookkeeping(unittest.TestCase):
     def test_wanted_failed_not_read_for_this_finish(self):
@@ -212,6 +228,25 @@ class LookUp(unittest.TestCase):
         ):
             self.assertEqual(cli.look_up_reasons(rows, {}, time.monotonic()), 0)
         self.assertEqual(asked.call_count, cli.MAX_FAILURES_IN_A_ROW)
+
+    def test_a_log_too_slow_to_classify_is_other(self):
+        rows = [row("a", "failed", "1"), row("b", "failed", "2")]
+        found, err = {}, io.StringIO()
+        with (
+            mock.patch.object(hydra, "build_drv", return_value="/nix/store/x.drv"),
+            mock.patch.object(hydra, "build_log", return_value=HASH),
+            mock.patch.object(
+                reasons, "classify", side_effect=[reasons.TooSlow, ("hash", "")]
+            ),
+            mock.patch("sys.stderr", err),
+        ):
+            self.assertEqual(cli.look_up_reasons(rows, found, time.monotonic()), 2)
+        self.assertEqual(
+            found["1"],
+            [FINISHED, "other", f"not classified: over {cli.LOG_SECONDS} s", 2],
+        )
+        self.assertEqual(found["2"][1], "hash")  # the next log is still read
+        self.assertIn("::warning::build 1: its log took over", err.getvalue())
 
     def test_published_with_counts_and_the_cache(self):
         rows = [row("a", "failed", "1"), row("b", "failed", "2")]

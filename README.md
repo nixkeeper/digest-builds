@@ -132,7 +132,7 @@ builds a run within the same 40 minutes, whether or not there's a new
 evaluation. About 4,700 failing on 2026-10-08 take several runs; after
 that, only those a new evaluation brings (a build Hydra doesn't redo keeps
 its id, and its log) and builds Hydra restarted (read again when they
-finish again). `data/reasons.json` keeps what each log said, with the rules' version: a log whose excerpt newer rules say better is read once more (pytest's excerpts, 349 of them, on 2026-10-23). The rules come
+finish again). `data/reasons.json` keeps what each log said, with the rules' version: a log whose excerpt newer rules say better is read once more (pytest's excerpts, 349 of them, on 2026-10-23). Each line is matched on its first 1,000 characters, and each log gets 30 seconds: one that takes longer is `other`, its excerpt saying so (on 2026-10-26 a log of one 4.2-million-character line held every run from 11:15 until the job's timeout). The rules come
 from [nixpkgs-failure-dashboard](https://github.com/Sigmanificient/nixpkgs-failure-dashboard)'s
 classifier (MIT), under nixkeeper's names, with a few more (C++, Rust,
 linker, Haskell and unittest failures, `$HOME`); on a sample of 100 failed
