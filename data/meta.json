@@ -1,0 +1,47 @@
+{
+  "blocked": {
+    "known": 1429,
+    "pending": 0
+  },
+  "builds": 215550,
+  "counts": {
+    "dependency": 1429,
+    "failed": 2936,
+    "ok": 210412,
+    "unfinished": 773
+  },
+  "eval": 1830887,
+  "fetchedAt": "2026-10-31T15:15:17+00:00",
+  "format": 1,
+  "lastSuccess": {
+    "known": 4496,
+    "never": 642,
+    "pending": 0
+  },
+  "reasons": {
+    "by": {
+      "cmake": 21,
+      "compile": 692,
+      "haskellDeps": 17,
+      "header": 94,
+      "home": 7,
+      "link": 71,
+      "lisp": 8,
+      "missingFile": 18,
+      "noLog": 3,
+      "npm": 7,
+      "other": 776,
+      "patch": 11,
+      "pythonBuild": 23,
+      "pythonDeps": 251,
+      "pythonImport": 186,
+      "pythonMetadata": 162,
+      "substitute": 35,
+      "symlinks": 2,
+      "tests": 552
+    },
+    "known": 2936,
+    "pending": 0
+  },
+  "revision": "5772e19988afd8bb223da0e260075f69205ea0d6"
+}
