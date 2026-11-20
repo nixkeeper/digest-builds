@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 
-from . import blocked, branches, digest, hydra, lastsuccess, page, reasons
+from . import archive, blocked, branches, digest, hydra, lastsuccess, page, reasons
 
 # While builds of the evaluation are still queued, its page is read again
 # this often, for their results; and at least this often anyway, for builds
@@ -162,11 +162,12 @@ def look_up_last_success(rows, never, started):
     return asked
 
 
-def look_up_reasons(rows, found, started):
+def look_up_reasons(rows, found, started, kept=None):
     """Read the logs of the failed builds reasons.wanted picks, at most
     MAX_LOGS and MAX_MINUTES since started, into found ({build: [finished,
     reason, excerpt, version]}); drop what it has on builds that aren't failed any
-    more. Returns how many were read."""
+    more. Each log read is also added to kept (an archive.Archive), if
+    given. Returns how many were read."""
     current = {r["build"] for r in rows if r["status"] == "failed"}
     for build in set(found) - current:
         del found[build]
@@ -190,7 +191,7 @@ def look_up_reasons(rows, found, started):
         else:
             try:
                 reason, lines = reasons.classify(
-                    log, deadline=time.monotonic() + LOG_SECONDS
+                    log.tail, deadline=time.monotonic() + LOG_SECONDS
                 )
             except reasons.TooSlow:
                 print(
@@ -200,7 +201,35 @@ def look_up_reasons(rows, found, started):
                 )
                 reason, lines = reasons.OTHER, f"not classified: over {LOG_SECONDS} s"
         found[row["build"]] = [row["finished"], reason, lines, reasons.VERSION]
+        if kept is not None and log is not None:
+            try:
+                kept.add(row, log, reason)
+            except OSError as e:  # a full disk: the digest goes on without
+                print(
+                    f"::warning::build {row['build']}: not archived: {e}",
+                    file=sys.stderr,
+                )
     return read
+
+
+def archive_from_env():
+    """The archive the logs read go to: BUILD_LOGS_DIR's, or None (unset:
+    none kept, as in the tests and local runs)."""
+    directory = os.environ.get("BUILD_LOGS_DIR")
+    return archive.Archive(directory) if directory else None
+
+
+def report_archive(kept):
+    """Write kept's index and say what it holds: printed, and in the job's
+    summary on GitHub Actions (GITHUB_STEP_SUMMARY)."""
+    if kept is None:
+        return
+    kept.write_index()
+    lines = kept.summary()
+    print("  " + lines[0])
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary, "a") as f:
+            f.write("\n".join(lines) + "\n")
 
 
 def due(latest, meta, now):
@@ -279,6 +308,7 @@ def main(argv=None):
     found = blocked.read(directory)
     never = lastsuccess.read(directory)
     because = reasons.read(directory)
+    kept = archive_from_env()
     # The branches first, on their own: a failure keeps their last files.
     branches.update_all(directory, now, due, previous, meta.get("eval"))
     latest = hydra.latest_eval()
@@ -291,7 +321,8 @@ def main(argv=None):
         # staging-next's after master's, with the pages left.
         look_up_staging_next_blocked(directory, previous, started, MAX_PAGES - read)
         asked = look_up_last_success(rows, never, started)
-        logs = look_up_reasons(rows, because, started)
+        logs = look_up_reasons(rows, because, started, kept)
+        report_archive(kept)
         if not read and not asked and not logs:
             print(f"Evaluation {latest}: nothing new since {meta['fetchedAt']}.")
             return 0
@@ -323,7 +354,8 @@ def main(argv=None):
         MAX_PAGES - read,
     )
     asked = look_up_last_success(rows, never, started)
-    look_up_reasons(rows, because, started)
+    look_up_reasons(rows, because, started, kept)
+    report_archive(kept)
     known = sum(1 for r in rows if r["status"] != "ok" and r["lastSuccessBuild"])
     publish(
         directory,
