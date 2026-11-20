@@ -127,7 +127,7 @@ digests carry on, so each job is asked once; one that never succeeded says
 **Why it failed.** Each run reads the logs of the failed builds it hasn't
 read yet: the build's derivation (`/build/<id>`, its JSON), then that
 derivation's log (`/log/<derivation>`; Hydra serves logs whole, so only
-the last 4 MB of a longer one is kept), one request a second, at most 600
+the last 4 MB of a longer one is classified), one request a second, at most 600
 builds a run within the same 40 minutes, whether or not there's a new
 evaluation. About 4,700 failing on 2026-10-08 take several runs; after
 that, only those a new evaluation brings (a build Hydra doesn't redo keeps
@@ -137,6 +137,15 @@ from [nixpkgs-failure-dashboard](https://github.com/Sigmanificient/nixpkgs-failu
 classifier (MIT), under nixkeeper's names, with a few more (C++, Rust,
 linker, Haskell and unittest failures, `$HOME`); on a sample of 100 failed
 builds (2026-10-08), 89 got a reason other than `other`.
+
+**The logs themselves.** With `BUILD_LOGS_DIR` set (the scheduled
+workflow sets it), each log read is also written there, gzipped, at
+`<attr>/<finished>-<system>-<build>.log.gz` (finished as
+`2026-11-11T1556`), with `index.json.gz` listing them: the whole log up to
+16 MB, else its first 1 MB and last 4 MB. They're meant for
+build-logs.nixkeeper.com, a folder per package; for now nothing is
+uploaded, and the job's summary says how many logs a run read and how big
+they are, raw and gzipped.
 
 ## Running it
 

@@ -10,6 +10,7 @@ import shutil
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 HYDRA_URL = "https://hydra.nixos.org"
@@ -169,8 +170,28 @@ def last_success(attr, system, jobset=JOBSET):
 
 
 # A build log's end is where it says why: of a longer log, only so many of
-# its last bytes are kept (the rules' hints are near the end too).
+# its last bytes are classified (the rules' hints are near the end too).
 LOG_KEEP = 4 << 20
+# What's kept of a log for the archive (archive.py): the whole log up to
+# LOG_MAX bytes; of a longer one, its first LOG_HEAD bytes and its last
+# LOG_KEEP, with a line saying how much was left out between.
+LOG_MAX = 16 << 20
+LOG_HEAD = 1 << 20
+
+
+@dataclass
+class Log:
+    """A build log as read: kept, what's kept of it (bytes); size, the
+    whole log's size; truncated, whether its middle was left out."""
+
+    kept: bytes
+    size: int
+    truncated: bool = False
+
+    @property
+    def tail(self):
+        """Its last LOG_KEEP bytes, as text: what the rules read."""
+        return self.kept[-LOG_KEEP:].decode("utf-8", "replace")
 
 
 def build_drv(build_id):
@@ -191,25 +212,35 @@ def build_drv(build_id):
 
 
 def build_log(drv):
-    """The log of the last build of derivation drv (a store path), as text,
-    its last LOG_KEEP bytes of a longer one; None when Hydra has none (404).
-    At most one a PAUSE; raises on any other failure. Hydra serves it whole
-    (no ranges), so it's read as it comes and only its end kept."""
+    """The log of the last build of derivation drv (a store path), as a Log:
+    the whole log up to LOG_MAX bytes, else its first LOG_HEAD and last
+    LOG_KEEP; None when Hydra has none (404). At most one a PAUSE; raises
+    on any other failure. Hydra serves it whole (no ranges), so it's read as
+    it comes and only what's kept is held."""
     _pace()
     req = urllib.request.Request(
         f"{HYDRA_URL}/log/{drv.rsplit('/', 1)[-1]}", headers={"User-Agent": USER_AGENT}
     )
     deadline = time.monotonic() + EVAL_DEADLINE // 4
+    head, rest, size = bytearray(), bytearray(), 0
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            body, kept = Deadline(resp, deadline), bytearray()
+            body = Deadline(resp, deadline)
             while chunk := body.read(1 << 16):
-                kept += chunk
-                if len(kept) > 2 * LOG_KEEP:
-                    del kept[:-LOG_KEEP]
+                size += len(chunk)
+                take = max(0, LOG_HEAD - len(head))
+                head += chunk[:take]
+                rest += chunk[take:]
+                if size > LOG_MAX and len(rest) > 2 * LOG_KEEP:
+                    del rest[:-LOG_KEEP]
     except urllib.error.HTTPError as e:
         e.close()
         if e.code == 404:
             return None
         raise
-    return bytes(kept[-LOG_KEEP:]).decode("utf-8", "replace")
+    if size <= LOG_MAX:
+        return Log(bytes(head + rest), size)
+    rest = rest[-LOG_KEEP:]
+    left_out = size - len(head) - len(rest)
+    marker = f"\n[... {left_out:,} bytes left out by nixkeeper ...]\n".encode()
+    return Log(bytes(head) + marker + bytes(rest), size, truncated=True)

@@ -40,7 +40,12 @@ jobs:
         run: bash scripts/data-branch.sh restore
 
       # The runner's Python 3: the digest uses the standard library only.
+      # The failed builds' logs it reads are kept in BUILD_LOGS_DIR too
+      # (nixkeeper_hydra/archive.py), not uploaded yet: the job's summary
+      # says how many and how big.
       - name: Bring the digest up to date
+        env:
+          BUILD_LOGS_DIR: ${{ runner.temp }}/build-logs
         run: python3 -m nixkeeper_hydra data
 
       - name: Publish the digest if it changed

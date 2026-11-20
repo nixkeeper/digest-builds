@@ -53,6 +53,13 @@ error: hash mismatch in fixed-output derivation '/nix/store/abc-source.drv':
             got:    sha256-BBBB
 """
 
+
+def log(text):
+    """A log as hydra.build_log reads it."""
+    raw = text.encode()
+    return hydra.Log(raw, len(raw))
+
+
 PATCH = """\
 applying patch /nix/store/xyz-fix-build.patch
 patching file src/main.c
@@ -199,7 +206,7 @@ class LookUp(unittest.TestCase):
     def test_reads_classifies_and_remembers(self):
         rows = [row("a", "failed", "1"), row("b", "failed", "2"), row("c", "ok", "3")]
         found = {"9": [FINISHED, "hash", ""]}  # a build no longer failing
-        logs = {"/nix/store/a.drv": HASH, "/nix/store/b.drv": None}
+        logs = {"/nix/store/a.drv": log(HASH), "/nix/store/b.drv": None}
         with (
             mock.patch.object(
                 hydra,
@@ -218,7 +225,7 @@ class LookUp(unittest.TestCase):
         with (
             mock.patch.object(cli, "MAX_LOGS", 3),
             mock.patch.object(hydra, "build_drv", return_value="/nix/store/x.drv"),
-            mock.patch.object(hydra, "build_log", return_value=HASH) as read,
+            mock.patch.object(hydra, "build_log", return_value=log(HASH)) as read,
         ):
             cli.look_up_reasons(rows, {}, time.monotonic())
         self.assertEqual(read.call_count, 3)
@@ -234,7 +241,7 @@ class LookUp(unittest.TestCase):
         found, err = {}, io.StringIO()
         with (
             mock.patch.object(hydra, "build_drv", return_value="/nix/store/x.drv"),
-            mock.patch.object(hydra, "build_log", return_value=HASH),
+            mock.patch.object(hydra, "build_log", return_value=log(HASH)),
             mock.patch.object(
                 reasons, "classify", side_effect=[reasons.TooSlow, ("hash", "")]
             ),
@@ -280,10 +287,32 @@ class Hydra(unittest.TestCase):
             mock.patch.object(hydra, "LOG_KEEP", 25),
             mock.patch.object(hydra.urllib.request, "urlopen", return_value=log) as get,
         ):
-            self.assertEqual(
-                hydra.build_log("/nix/store/abc-x.drv"), "5678901234567890123456789"
-            )
+            found = hydra.build_log("/nix/store/abc-x.drv")
+            self.assertEqual(found.tail, "5678901234567890123456789")
+        # The whole log is kept (under LOG_MAX); only the rules read its end.
+        self.assertEqual(
+            (found.kept, found.size, found.truncated), (b"0123456789" * 10, 100, False)
+        )
         self.assertTrue(get.call_args.args[0].full_url.endswith("/log/abc-x.drv"))
+
+    def test_a_long_log_keeps_its_head_and_tail(self):
+        body = bytes(range(48, 58)) * 10  # 100 bytes: "0123456789" ten times
+        with (
+            mock.patch.object(hydra.time, "sleep"),
+            mock.patch.object(hydra, "LOG_KEEP", 7),
+            mock.patch.object(hydra, "LOG_HEAD", 5),
+            mock.patch.object(hydra, "LOG_MAX", 50),
+            mock.patch.object(
+                hydra.urllib.request, "urlopen", return_value=io.BytesIO(body)
+            ),
+        ):
+            found = hydra.build_log("/nix/store/abc-x.drv")
+            self.assertEqual(found.tail, "3456789")
+        self.assertTrue(found.truncated)
+        self.assertEqual(found.size, 100)
+        self.assertEqual(
+            found.kept, b"01234\n[... 88 bytes left out by nixkeeper ...]\n3456789"
+        )
 
     def test_no_log_and_other_failures(self):
         gone = urllib.error.HTTPError("u", 404, "Not Found", {}, io.BytesIO(b""))
